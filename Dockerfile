@@ -12,11 +12,11 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 COPY . .
 
-RUN useradd -r -s /bin/false sloptotal && \
+RUN useradd -r -s /bin/false origyn && \
     mkdir -p /app/models /app/data && \
-    chown -R sloptotal:sloptotal /app/models /app/data
+    chown -R origyn:origyn /app/models /app/data
 
-USER sloptotal
+USER origyn
 
 ENV HF_HOME=/app/models
 EXPOSE 8000

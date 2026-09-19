@@ -3,21 +3,21 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
-TEMPLATES_DIR = PROJECT_ROOT / "web" / "templates"
-STATIC_DIR = PROJECT_ROOT / "web" / "static"
 
 # Database settings (configurable via environment)
-DATA_DIR = Path(os.getenv("SLOPTOTAL_DATA_DIR", str(BASE_DIR.parent / "data")))
-DATABASE_PATH = DATA_DIR / os.getenv("SLOPTOTAL_DB_NAME", "sloptotal.db")
-CACHE_ENABLED = os.getenv("SLOPTOTAL_CACHE_ENABLED", "true").lower() in (
+DATA_DIR = Path(
+    os.getenv("ORIGYN_DATA_DIR", os.getenv("SLOPTOTAL_DATA_DIR", str(BASE_DIR.parent / "data")))
+)
+DATABASE_PATH = DATA_DIR / os.getenv("ORIGYN_DB_NAME", os.getenv("SLOPTOTAL_DB_NAME", "origyn.db"))
+CACHE_ENABLED = os.getenv("ORIGYN_CACHE_ENABLED", os.getenv("SLOPTOTAL_CACHE_ENABLED", "true")).lower() in (
     "true",
     "1",
     "yes",
 )
 
 # Database connection settings
-DB_TIMEOUT = float(os.getenv("SLOPTOTAL_DB_TIMEOUT", "30.0"))  # seconds
-DB_BUSY_TIMEOUT = int(os.getenv("SLOPTOTAL_DB_BUSY_TIMEOUT", "5000"))  # milliseconds
+DB_TIMEOUT = float(os.getenv("ORIGYN_DB_TIMEOUT", os.getenv("SLOPTOTAL_DB_TIMEOUT", "30.0")))  # seconds
+DB_BUSY_TIMEOUT = int(os.getenv("ORIGYN_DB_BUSY_TIMEOUT", os.getenv("SLOPTOTAL_DB_BUSY_TIMEOUT", "5000")))  # milliseconds
 
 # GPT-2 model name for perplexity engines
 GPT2_MODEL = "gpt2-medium"

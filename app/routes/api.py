@@ -1,8 +1,10 @@
 import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.responses import StreamingResponse
 
 from app.schemas import (
     AnalyzeRequest,
@@ -12,8 +14,11 @@ from app.schemas import (
 )
 from app.analyzer import (
     analyze_text,
+    start_analysis,
+    stream_results,
     get_report,
     get_recent_reports,
+    get_engine_list,
     get_engine_list_rich,
     quick_analyze_text,
     quick_analyze_batch,
@@ -525,3 +530,154 @@ async def api_scan_stats():
 async def api_engines():
     """Return metadata for all detection engines."""
     return get_engine_list_rich()
+
+
+@router.post("/analyze/start")
+@router.post("/web/analyze")
+async def api_start_analysis(request: Request, req: AnalyzeRequest):
+    """Start an asynchronous analysis and return a report ID for SSE streaming."""
+    queue_manager = request.app.state.queue_manager
+    try:
+        if req.url and req.url.strip():
+            content = await extract_text_from_url(req.url.strip())
+            source_type, source = "url", req.url.strip()
+        elif req.text and req.text.strip():
+            content = req.text.strip()
+            if len(content) < 50:
+                return JSONResponse(
+                    {"error": "Please provide at least 50 characters of text."},
+                    status_code=400,
+                )
+            source_type, source = "text", content[:100]
+        else:
+            return JSONResponse(
+                {"error": "Please provide a 'url' or 'text' field to analyze."},
+                status_code=400,
+            )
+
+        if not queue_manager:
+            report_id, is_cached = await start_analysis(
+                content, source_type=source_type, source=source
+            )
+            return {"status": "started", "report_id": report_id}
+
+        from app.cache import compute_text_hash
+
+        text_hash = compute_text_hash(content)
+
+        async def _execute(payload):
+            rid, _cached = await start_analysis(
+                payload["text"],
+                source_type=payload["source_type"],
+                source=payload["source"],
+                _queue_managed=True,
+            )
+            return {"report_id": rid}
+
+        resp = await queue_manager.submit(
+            "full",
+            {"text": content, "source_type": source_type, "source": source},
+            text_hash,
+            _execute,
+        )
+
+        if resp["status"] == "completed":
+            return {"status": "started", "report_id": resp["result"]["report_id"]}
+        elif resp["status"] == "queued":
+            return JSONResponse(resp, status_code=202)
+        elif resp["status"] == "rejected":
+            return JSONResponse(
+                {"error": resp["error"], "retry_after": resp.get("retry_after", 5)},
+                status_code=429,
+            )
+        elif resp["status"] == "error":
+            err = resp.get("error", "")
+            if "busy" in err.lower():
+                return JSONResponse({"error": err, "retry_after": 2}, status_code=429)
+            return JSONResponse({"error": err or "Analysis failed"}, status_code=500)
+        else:
+            return JSONResponse(
+                {"error": resp.get("error", "Unknown error")}, status_code=500
+            )
+    except ValueError as e:
+        if "busy" in str(e).lower():
+            return JSONResponse({"error": str(e), "retry_after": 2}, status_code=429)
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        log.error(f"Async analyze failed: {e}", exc_info=True)
+        return JSONResponse(
+            {"error": "Analysis failed. Please try again."}, status_code=500
+        )
+
+
+@router.get("/stream/{report_id}")
+async def sse_stream(report_id: str):
+    """Server-Sent Events endpoint — streams engine results as they complete."""
+    if not report_id or len(report_id) > 12 or not report_id.isalnum():
+        raise HTTPException(status_code=400, detail="Invalid report ID")
+
+    report = await get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    async def event_generator():
+        has_stream = False
+        try:
+            async for key, result, updated_report in stream_results(report_id):
+                has_stream = True
+                data = json.dumps(
+                    {
+                        "key": key,
+                        "engine_name": result.engine_name,
+                        "score": result.score,
+                        "verdict": result.verdict.value,
+                        "details": result.details,
+                        "description": result.description,
+                        "overall_score": updated_report.overall_score,
+                        "overall_verdict": updated_report.overall_verdict,
+                        "engines_flagged": updated_report.engines_flagged,
+                        "engines_total": updated_report.engines_total,
+                        "engines_done": len(updated_report.engine_results),
+                    }
+                )
+                yield f"data: {data}\n\n"
+        except Exception as e:
+            log.error(f"Error in SSE stream: {e}")
+
+        # If no stream was available (analysis already finished), replay stored results
+        if not has_stream and report.engine_results:
+            for result in report.engine_results:
+                eng_key = ""
+                for ek, ename, _ in get_engine_list():
+                    if ename == result.engine_name:
+                        eng_key = ek
+                        break
+                data = json.dumps(
+                    {
+                        "key": eng_key,
+                        "engine_name": result.engine_name,
+                        "score": result.score,
+                        "verdict": result.verdict.value,
+                        "details": result.details,
+                        "description": result.description,
+                        "overall_score": report.overall_score,
+                        "overall_verdict": report.overall_verdict,
+                        "engines_flagged": report.engines_flagged,
+                        "engines_total": report.engines_total,
+                        "engines_done": len(report.engine_results),
+                    }
+                )
+                yield f"data: {data}\n\n"
+
+        yield f"data: {json.dumps({'done': True})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+

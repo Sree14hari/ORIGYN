@@ -16,10 +16,7 @@ torch.set_num_interop_threads(1)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 
-from app.config import TEMPLATES_DIR, STATIC_DIR
 from app.database import (
     init_database,
     check_database_health,
@@ -30,7 +27,6 @@ from app.database import (
 from app.analyzer import get_engine_list, shutdown_analyzer, _max_full, _max_snippet
 from app.queue_manager import QueueManager
 
-from app.routes.web import router as web_router
 from app.routes.api import router as api_router
 from app.routes.queue import router as queue_router
 
@@ -47,7 +43,7 @@ log = logging.getLogger("sloptotal")
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown."""
     print(format_banner(_hw, _profile, _config))
-    log.info(f"Starting SlopTotal (profile={_profile}, device={get_device()})...")
+    log.info(f"Starting ORIGYN API (profile={_profile}, device={get_device()})...")
     await init_database()
     purged = await purge_invalid_cached_reports()
     if purged:
@@ -69,36 +65,59 @@ async def lifespan(app: FastAPI):
     await queue_manager.start()
     app.state.queue_manager = queue_manager
 
-    log.info("SlopTotal started")
+    log.info("ORIGYN API started")
     yield
-    log.info("Shutting down SlopTotal...")
+    log.info("Shutting down ORIGYN API...")
     retention_task.cancel()
     await queue_manager.stop()
     shutdown_analyzer()
-    log.info("SlopTotal shutdown complete")
+    log.info("ORIGYN API shutdown complete")
 
 
 app = FastAPI(
-    title="SlopTotal",
-    description="VirusTotal for AI slop detection",
+    title="ORIGYN API",
+    description="ORIGYN - AI Content Detection API running 23 independent detection engines",
     lifespan=lifespan,
 )
 
+cors_origins_env = os.getenv("ORIGYN_CORS_ORIGINS", os.getenv("SLOPTOTAL_CORS_ORIGINS", "*"))
+cors_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"^(chrome-extension://.*|http://localhost(:\d+)?|https://sloptotal\.com|https://pablocaeg\.github\.io)$",
-    allow_methods=["GET", "POST"],
+    allow_origins=cors_origins if "*" not in cors_origins else ["*"],
+    allow_credentials=True if "*" not in cors_origins else False,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 app.state.queue_manager = None  # set in lifespan
 
-# Include routers
-app.include_router(web_router)
+# API Routers
 app.include_router(api_router)
 app.include_router(queue_router)
+
+
+@app.get("/")
+async def root():
+    """API entry point returning service status and available endpoints."""
+    return {
+        "service": "ORIGYN API",
+        "description": "ORIGYN - High-accuracy AI detection API running 23 independent detection engines",
+        "docs": "/docs",
+        "health": "/health",
+        "endpoints": {
+            "quick_score": "POST /api/quick-score",
+            "analyze": "POST /api/analyze",
+            "start_analysis": "POST /api/analyze/start",
+            "stream_results": "GET /api/stream/{report_id}",
+            "report": "GET /api/report/{report_id}",
+            "paragraph_score": "POST /api/paragraph-score",
+            "scan_snippets": "POST /api/scan/snippets",
+            "scan_urls": "POST /api/scan/urls",
+            "engines": "GET /api/engines",
+            "queue_status": "GET /api/queue/status",
+        },
+    }
 
 
 async def _retention_loop():
