@@ -1,0 +1,24 @@
+.git
+.github
+.claude
+frontend
+extension
+# web/ must ship: app/main.py mounts web/static and loads Jinja templates from
+# web/templates at import time, so excluding it makes the image fail to boot
+# with "Directory '/app/web/static' does not exist".
+tests
+docs
+*.md
+!requirements.txt
+.env*
+.vscode
+.idea
+__pycache__
+*.pyc
+data/
+models/
+venv/
+.venv/
+*.db
+.DS_Store
+node_modules/

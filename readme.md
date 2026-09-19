@@ -1,1166 +1,342 @@
-# PaperLab AI Detector V1
-
-A lightweight, research-oriented AI-generated text detection system for **PaperLab**.
-
-PaperLab AI Detector V1 is designed to classify academic and general-purpose text as **human-written or AI-generated** while keeping training and production infrastructure relatively inexpensive.
-
-The first version intentionally avoids large generative LLMs. Instead, it fine-tunes a compact transformer-based text classifier using PyTorch and Hugging Face Transformers.
-
-> **Status:** V1 — Research / Development
-> **Primary framework:** PyTorch
-> **Primary model:** DeBERTa-v3-small
-> **Task:** AI-generated text detection
-> **Target:** Academic and technical writing
-
----
-
-## 1. Goals
-
-The primary goal of V1 is to answer:
-
-> Can a relatively small classifier reliably distinguish human-written academic text from modern AI-generated text, including text from models that were not present in the training data?
-
-### V1 objectives
-
-* Train a lightweight AI-text detector.
-* Support modern AI-generated text.
-* Avoid dependency on a large LLM at inference time.
-* Keep production inference inexpensive.
-* Support CPU inference where practical.
-* Evaluate generalization to unseen generators.
-* Measure false-positive rates carefully.
-* Produce a probability score rather than a simplistic binary claim.
-* Create a foundation for future PaperLab detector versions.
-
----
-
-# 2. Non-Goals for V1
-
-The following are intentionally postponed:
-
-* Training a foundation LLM from scratch.
-* Running a 7B+ LLM for every document.
-* Identifying the exact AI model that generated text.
-* Detecting every future AI model.
-* Multilingual detection.
-* Full plagiarism detection.
-* AI image detection.
-* Voice/audio detection.
-* Browser extensions.
-* Production SaaS infrastructure.
-* Advanced sentence-level explanations.
-* Automatic disciplinary or academic-integrity decisions.
-
-These can be considered for later versions.
-
----
-
-# 3. High-Level Architecture
-
-```text
-                         PaperLab
-                            |
-                            v
-                     Document Upload
-                            |
-                            v
-                  PDF / DOCX Extraction
-                            |
-                            v
-                     Text Preprocessing
-                            |
-                            v
-                      Text Chunking
-                            |
-                            v
-                  DeBERTa-v3-small
-                            |
-                            v
-                    AI Probability
-                            |
-                            v
-                    Chunk Aggregation
-                            |
-                            v
-                   Document AI Score
-                            |
-                 +----------+----------+
-                 |                     |
-                 v                     v
-            PaperLab UI           API Response
-```
+# SlopTotal
 
-The detector does not need a generative LLM during inference.
+[![CI](https://github.com/pablocaeg/sloptotal/actions/workflows/ci.yml/badge.svg)](https://github.com/pablocaeg/sloptotal/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Website](https://img.shields.io/badge/website-sloptotal.com-blue)](https://sloptotal.com)
 
----
+**VirusTotal for AI slop detection.** Scan any text or URL with 23 independent detection engines running entirely on your hardware. No data sent to third parties.
 
-# 4. Model
+## What it does
 
-## Primary V1 Model
+SlopTotal runs 23 AI detection engines in parallel -- neural classifiers, statistical tests, and linguistic heuristics -- and produces a calibrated forensic score. Results stream in real-time as each engine completes.
 
-**DeBERTa-v3-small**
+**Live demo:** [sloptotal.com](https://sloptotal.com) — or read the [per-engine scores](https://sloptotal.com/engines/) and [what the measurements show](https://sloptotal.com/detect/ai-detector-benchmark/).
 
-The model is used as a sequence classification model.
+## Measured accuracy
 
-```text
-Input Text
-    |
-Tokenizer
-    |
-DeBERTa-v3-small
-    |
-Classification Head
-    |
-+-------------------+
-|                   |
-Human              AI
-```
+Most detectors publish an accuracy figure without saying what it was measured on.
+These numbers, the harness that produced them and the raw per-sample results are
+all in [tests/eval/](tests/eval/).
 
-The classifier outputs probabilities rather than a hard yes/no answer.
+Two corpora, deliberately:
 
-Example:
+| Corpus | What | Size |
+|---|---|---|
+| Multi-domain | RAID: news, book prose, poetry, academic abstracts. AI from GPT-4, ChatGPT, Llama, Mistral, Cohere, GPT-3 | 110 (40 human, 70 AI) |
+| Literary control | Project Gutenberg prose published 1532-1915 -- Machiavelli, Austen, Melville, Kafka | 26 (all human) |
 
-```json
-{
-  "human_probability": 0.18,
-  "ai_probability": 0.82
-}
-```
+The second exists because a high score there cannot be anything but an error: the
+writing predates language models by a century or more. Optimising on the first
+corpus alone produces a threshold that mislabels literature.
 
----
+| | Result |
+|---|---|
+| Overall AUC | 0.974 |
+| AI reaching "Suspicious" or above | 90% |
+| Human text wrongly called "Likely AI" | 1 of 66 |
+| Literary passages flagged | **0 of 26** |
 
-# 5. Why DeBERTa-v3-small?
+**What does not work.** Short text is unreliable below roughly 80 words and
+settles from about 200. Hand-edited AI loses fingerprints with every rewriting
+pass. Source code is outside what these engines do: in testing they never falsely
+accused human code, and never caught machine-written code either -- so we do not
+claim they can.
 
-V1 prioritizes:
+The failures are published too, including three engines found scoring backwards
+and two loading a randomly initialised network while carrying real ensemble
+weight. Read them at
+[sloptotal.com/detect/ai-detector-benchmark/](https://sloptotal.com/detect/ai-detector-benchmark/)
+and [sloptotal.com/detect/ai-detector-false-positives/](https://sloptotal.com/detect/ai-detector-false-positives/).
 
-1. Low inference cost
-2. Reasonable model size
-3. Strong NLP representation
-4. Hugging Face compatibility
-5. PyTorch support
-6. CPU inference possibility
-7. Easy experimentation
+## Quick Start
 
-A larger model may eventually provide better performance, but V1 should establish a strong baseline before increasing infrastructure requirements.
+### Requirements
 
-Potential future models:
+- **Python 3.10+** (3.11 recommended — macOS ships 3.9, which is too old)
+- **4 GB RAM** minimum (lite profile); **8 GB** standard; **16 GB+** for best CPU throughput
+- **No GPU required** — all engines run on CPU; CUDA optional for faster inference
+- ~2 GB disk for HuggingFace model cache on first run
 
-```text
-DeBERTa-v3-small
-        |
-        v
-DeBERTa-v3-base
-        |
-        v
-Larger encoder / ensemble
-```
-
-Model selection should ultimately be based on:
-
-> Detection quality per dollar of infrastructure
-
-rather than parameter count.
-
----
-
-# 6. Dataset Strategy
-
-AI-text detection is highly dependent on the training and evaluation data.
-
-V1 should not depend on a single dataset.
-
-The planned dataset sources are:
-
-### RAID
-
-Large-scale AI-generated text dataset containing multiple generators, domains, and adversarial transformations.
-
-Repository:
-
-https://github.com/liamdugan/raid
-
-RAID should be sampled rather than blindly downloading and training on the entire dataset.
-
----
-
-### CCKS26-AIGC
-
-A recent AI-generated text detection dataset containing human, machine-generated, and human-machine collaborative examples.
-
-Repository:
-
-https://github.com/ASCII-LAB/CCKS26-Task6-LLM-Generated-Text-Detect-Trace
-
-This is particularly useful for modern-generation examples and AI-assisted writing.
-
----
-
-### TXD-22
-
-A multi-class text dataset containing human, AI-generated and mixed-author text across multiple AI systems.
-
-Source:
-
-https://data.mendeley.com/datasets/prcjcggtjf/1
-
-TXD-22 can help broaden generator and writing-style coverage.
-
----
-
-### PaperLab Academic Dataset
-
-PaperLab should eventually maintain its own dataset focused specifically on academic writing.
-
-Potential categories:
-
-```text
-Human
-├── Essays
-├── Research papers
-├── Technical reports
-├── Lab reports
-├── Literature reviews
-└── Theses
-
-AI
-├── AI-generated essays
-├── AI-generated research-style text
-├── AI-generated reports
-└── AI-generated technical writing
-
-AI-Assisted
-├── Grammar correction
-├── Rewriting
-├── Expansion
-├── Summarization
-└── Paraphrasing
-```
-
-Any dataset incorporated into a commercial PaperLab product must be reviewed for its license and permitted use.
-
----
-
-# 7. Dataset Labels
-
-V1 uses binary classification:
-
-```text
-0 = HUMAN
-1 = AI
-```
-
-Example:
-
-```json
-{
-  "text": "This study investigates...",
-  "label": 1
-}
-```
-
-Metadata should be preserved whenever available.
-
-Recommended schema:
-
-```json
-{
-  "id": "unique-id",
-  "text": "document text",
-  "label": 1,
-  "source": "raid",
-  "generator": "model-name",
-  "domain": "academic",
-  "language": "en"
-}
-```
-
-Metadata is important for evaluation even when it is not directly passed to the model.
-
----
-
-# 8. Train / Validation / Test Strategy
-
-A random 80/20 split is not sufficient for AI detection.
-
-The detector must be tested against conditions it has not seen during training.
-
-Example:
-
-```text
-TRAIN
--------------------------
-Model A
-Model B
-Model C
-
-VALIDATION
--------------------------
-Different prompts
-Different documents
-
-TEST
--------------------------
-Unseen generator
-Unseen prompts
-Unseen domains
-AI paraphrasing
-AI rewriting
-Human editing
-```
-
-This is called a **generator-disjoint / condition-disjoint evaluation strategy**.
-
-The goal is to measure generalization rather than memorization.
-
----
-
-# 9. Recommended Project Structure
-
-```text
-paperlab-detector/
-│
-├── README.md
-├── LICENSE
-├── requirements.txt
-├── pyproject.toml
-│
-├── configs/
-│   └── v1.yaml
-│
-├── data/
-│   ├── raw/
-│   │   ├── raid/
-│   │   ├── ccks/
-│   │   └── txd/
-│   │
-│   ├── processed/
-│   │
-│   ├── train/
-│   ├── validation/
-│   └── test/
-│
-├── models/
-│   ├── checkpoints/
-│   └── paperlab-detector-v1/
-│
-├── src/
-│   ├── __init__.py
-│   │
-│   ├── data/
-│   │   ├── __init__.py
-│   │   ├── download.py
-│   │   ├── clean.py
-│   │   ├── normalize.py
-│   │   ├── chunk.py
-│   │   └── split.py
-│   │
-│   ├── model/
-│   │   ├── __init__.py
-│   │   ├── model.py
-│   │   └── tokenizer.py
-│   │
-│   ├── training/
-│   │   ├── __init__.py
-│   │   ├── train.py
-│   │   └── evaluate.py
-│   │
-│   └── inference/
-│       ├── __init__.py
-│       └── predict.py
-│
-├── scripts/
-│   ├── prepare_data.py
-│   ├── train.py
-│   └── evaluate.py
-│
-├── tests/
-│   ├── test_data.py
-│   ├── test_model.py
-│   └── test_inference.py
-│
-└── notebooks/
-    ├── dataset_analysis.ipynb
-    └── model_evaluation.ipynb
-```
-
----
-
-# 10. Environment
-
-Recommended:
-
-```text
-Python 3.11+
-PyTorch
-Hugging Face Transformers
-Hugging Face Datasets
-Accelerate
-scikit-learn
-pandas
-numpy
-sentencepiece
-```
-
-Optional:
-
-```text
-PEFT
-bitsandbytes
-evaluate
-Weights & Biases
-```
-
----
-
-# 11. Installation
-
-Create a virtual environment:
+### Install
 
 ```bash
-python -m venv .venv
-```
+# Clone and install
+git clone https://github.com/pablocaeg/sloptotal.git
+cd sloptotal
 
-Activate it.
-
-Linux/macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows:
-
-```powershell
-.venv\Scripts\activate
-```
-
-Install dependencies:
-
-```bash
+# Use Python 3.10+ explicitly (example: Homebrew on macOS)
+python3.11 -m venv venv && source venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
+
+# Optional: copy env template
+cp .env.example .env
+
+# Start (auto-detects hardware, downloads models on first run)
+./start.sh
+# or manually:
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Verify PyTorch:
+Open `http://localhost:8000` in your browser.
+
+> **Re-scanning the same URL?** Results are cached by content hash. After upgrading dependencies, stale failure reports are purged automatically on startup. Run a fresh scan if you previously saw "Model loading failed".
+
+### Docker
 
 ```bash
-python -c "import torch; print(torch.__version__)"
+docker compose up
 ```
 
-Check CUDA:
+## Architecture
+
+```
+sloptotal/
+├── app/                    # Backend (Python/FastAPI)
+│   ├── main.py             # App factory, lifespan, middleware
+│   ├── routes/
+│   │   ├── web.py          # Web page routes (/, /report, /analyze, SSE)
+│   │   ├── api.py          # JSON API (/api/quick-score, /api/analyze, etc.)
+│   │   └── queue.py        # Queue status & ticket polling
+│   ├── analyzer.py         # Core analysis orchestration & scoring
+│   ├── engines/            # 23 detection engines
+│   │   ├── base.py         # BaseEngine ABC
+│   │   └── ...             # One file per engine
+│   ├── config.py           # Configuration & engine weights
+│   ├── schemas.py          # Pydantic models
+│   ├── database.py         # SQLite async storage
+│   ├── cache.py            # Content hashing & caching
+│   ├── scraper.py          # URL content extraction
+│   ├── autoconfig.py       # Hardware detection & profiling
+│   ├── model_pool.py       # Thread-safe model replica pools
+│   └── queue_manager.py    # Request queuing & backpressure
+├── web/                    # Web Frontend
+│   ├── templates/          # Jinja2 templates
+│   └── static/             # CSS, JS, images
+├── extension/              # Chrome Extension (Manifest V3)
+│   ├── manifest.json
+│   ├── background.js
+│   ├── popup/
+│   └── content/
+└── tests/                  # Evaluation scripts
+```
+
+## API Endpoints
+
+| Endpoint | Method | Description | Latency |
+|----------|--------|-------------|---------|
+| `/api/quick-score` | POST | 6 engines (fast) | ~100-500ms |
+| `/api/paragraph-score` | POST | Per-paragraph heat map | ~1-3s |
+| `/api/scan/snippets` | POST | Batch scan (1-30 snippets) | ~500ms |
+| `/api/analyze` | POST | Full 23-engine analysis | ~3-8s |
+| `/api/engines` | GET | Engine metadata | instant |
+| `/api/recent` | GET | Recent reports | instant |
+| `/api/report/{id}` | GET | Full report data | instant |
+| `/api/queue/status` | GET | Queue capacity | instant |
+
+### Quick Score Example
 
 ```bash
-python -c "import torch; print(torch.cuda.is_available())"
+curl -X POST http://localhost:8000/api/quick-score \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Your text to analyze here..."}'
 ```
 
-If this returns:
-
-```text
-True
-```
-
-PyTorch can access the NVIDIA GPU.
-
----
-
-# 12. Example requirements.txt
-
-```text
-torch
-transformers
-datasets
-accelerate
-scikit-learn
-pandas
-numpy
-sentencepiece
-tqdm
-pyyaml
-```
-
-Exact versions should be pinned once the V1 environment has been validated.
-
----
-
-# 13. Data Processing Pipeline
-
-Raw datasets should never be fed directly into training.
-
-The pipeline should be:
-
-```text
-Raw Dataset
-     |
-     v
-Load
-     |
-     v
-Normalize
-     |
-     v
-Remove invalid records
-     |
-     v
-Remove duplicates
-     |
-     v
-Validate labels
-     |
-     v
-Filter extremely short text
-     |
-     v
-Split
-     |
-     v
-Chunk
-     |
-     v
-Training Dataset
-```
-
----
-
-# 14. Text Cleaning
-
-Basic cleaning may include:
-
-* Removing empty samples
-* Removing duplicate text
-* Normalizing whitespace
-* Removing malformed records
-* Validating encoding
-* Removing unusably short samples
-* Detecting language where required
-
-Do **not** aggressively normalize punctuation or grammar.
-
-Those characteristics may contain useful detection signals.
-
----
-
-# 15. Chunking
-
-Academic documents can contain thousands of tokens.
-
-DeBERTa-v3-small should therefore process chunks rather than an entire paper.
-
-Example:
-
-```text
-Paper
- |
- +-- Chunk 1
- +-- Chunk 2
- +-- Chunk 3
- +-- Chunk 4
- +-- ...
-```
-
-Initial configuration:
-
-```text
-Maximum sequence length: 512 tokens
-```
-
-The exact chunking strategy should be evaluated.
-
-Possible approaches:
-
-* Sentence-based chunks
-* Paragraph-based chunks
-* Sliding token windows
-* Paragraph + token fallback
-
-For V1, paragraph-based chunking with a token-length fallback is a practical starting point.
-
----
-
-# 16. Training Configuration
-
-Initial experiment:
-
-```yaml
-model:
-  name: microsoft/deberta-v3-small
-  num_labels: 2
-
-training:
-  learning_rate: 2.0e-5
-  epochs: 3
-  max_length: 512
-  batch_size: 16
-  weight_decay: 0.01
-
-optimization:
-  fp16: true
-
-output:
-  directory: models/paperlab-detector-v1
-```
-
-These are starting values.
-
-They should not be treated as final hyperparameters.
-
----
-
-# 17. Training
-
-Conceptually:
-
-```bash
-python scripts/prepare_data.py
-```
-
-Then:
-
-```bash
-python scripts/train.py
-```
-
-Training should produce:
-
-```text
-models/
-└── paperlab-detector-v1/
-    ├── config.json
-    ├── model.safetensors
-    ├── tokenizer.json
-    └── tokenizer_config.json
-```
-
----
-
-# 18. Evaluation
-
-Run:
-
-```bash
-python scripts/evaluate.py
-```
-
-The evaluation should report at least:
-
-```text
-Accuracy
-Precision
-Recall
-F1
-AUROC
-AUPRC
-False Positive Rate
-False Negative Rate
-```
-
-Example:
-
-```text
-==============================
-PaperLab Detector V1
-==============================
-
-Accuracy:        XX.XX%
-Precision:       XX.XX%
-Recall:          XX.XX%
-F1:              XX.XX%
-AUROC:           XX.XX%
-False Positive:  XX.XX%
-```
-
-The actual values should only be reported after testing.
-
----
-
-# 19. False Positives
-
-False positives are a major concern for an academic product.
-
-A legitimate human-written paper incorrectly classified as AI-generated can cause significant harm.
-
-Therefore, V1 should track:
-
-```text
-False Positive Rate
-```
-
-separately for:
-
-* Academic writing
-* Technical writing
-* General writing
-* Different authors
-* Different domains
-* Different lengths
-
-Do not optimize solely for overall accuracy.
-
----
-
-# 20. Document-Level Prediction
-
-The model operates on chunks.
-
-PaperLab needs a document-level score.
-
-Example:
-
-```text
-Chunk 1 → 0.12
-Chunk 2 → 0.21
-Chunk 3 → 0.91
-Chunk 4 → 0.83
-Chunk 5 → 0.17
-```
-
-These scores can be aggregated into a document-level estimate.
-
-Possible aggregation features:
-
-```text
-Mean
-Median
-Percentile
-Fraction above threshold
-Weighted mean
-```
-
-V1 should experiment with multiple aggregation strategies using the validation set.
-
----
-
-# 21. Inference Output
-
-The detector should return structured data.
-
-Example:
-
+Response:
 ```json
 {
-  "document_score": 0.74,
-  "classification": "ai_like",
-  "chunks": [
-    {
-      "index": 0,
-      "score": 0.12
-    },
-    {
-      "index": 1,
-      "score": 0.88
-    }
-  ]
+  "score": 72.3,
+  "verdict": "ai",
+  "confidence": "high",
+  "engines": [...],
+  "elapsed_ms": 340.2
 }
 ```
 
-The API should preserve the raw probability.
+## Detection Engines
 
-Avoid hard-coding a statement such as:
+Every engine links to its page on sloptotal.com, which carries its measured scores against both corpora. AUC below is the probability the engine ranks a random AI passage above a random human one: 1.0 is perfect, 0.5 is a coin flip.
 
-```text
-AI = TRUE
+### Neural Classifiers
+
+| Engine | Model | AUC | Notes |
+|---|---|---|---|
+| [Desklib DeBERTa](https://sloptotal.com/engines/desklib-deberta/) | DeBERTa-v3-large (435M) | 1.000 | Strongest separation in our own tests |
+| [SuperAnnotate](https://sloptotal.com/engines/superannotate/) | RoBERTa-large (355M) | 0.989 | No measurable bias against archaic prose |
+| [E5-Small](https://sloptotal.com/engines/e5-small/) | E5 + LoRA (33M) | 0.999 | Matches far larger models at 33M params |
+| [TMR Detector](https://sloptotal.com/engines/tmr-detector/) | RoBERTa-base (125M) | 1.000 | RAID-trained, so RAID scores flatter it |
+| [BERT-tiny RAID](https://sloptotal.com/engines/bert-tiny-raid/) | BERT-tiny (4.4M) | 1.000 | Answers in milliseconds |
+| [ReMoDetect](https://sloptotal.com/engines/remodetect/) | DeBERTa (184M) | 0.941 | Targets RLHF-aligned LLMs |
+| [ChatGPT Detector](https://sloptotal.com/engines/chatgpt-detector/) | RoBERTa-base (125M) | 0.829 | ChatGPT-specific |
+| [Fakespot](https://sloptotal.com/engines/fakespot/) | RoBERTa-base (125M) | 0.999 | Accurate on modern text, but +0.533 bias on pre-1920 prose |
+| [OpenAI Detector](https://sloptotal.com/engines/openai-detector/) | RoBERTa-base (125M) | 0.771 | The 2019 GPT-2 detector; weaker on modern LLMs |
+
+### Statistical Methods
+
+| Engine | Method | AUC |
+|---|---|---|
+| [Log-Rank](https://sloptotal.com/engines/log-rank/) | Average log-rank under GPT-2 | 0.909 |
+| [GLTR](https://sloptotal.com/engines/gltr/) | Token rank distribution | 0.904 |
+| [Perplexity](https://sloptotal.com/engines/perplexity/) | GPT-2 perplexity scoring | 0.901 |
+| [Cross-Perplexity](https://sloptotal.com/engines/cross-perplexity/) | Two-model perplexity comparison | 0.891 |
+| [Fast-DetectGPT](https://sloptotal.com/engines/fast-detectgpt/) | Conditional probability curvature | 0.890 |
+| [Binoculars](https://sloptotal.com/engines/binoculars/) | Cross-entropy ratio between two LMs | 0.836 |
+| [DivEye](https://sloptotal.com/engines/diveye/) | Surprisal diversity | 0.730 |
+
+### Linguistic Heuristics
+
+| Engine | Signal | AUC |
+|---|---|---|
+| [Structural Analysis](https://sloptotal.com/engines/structural-analysis/) | Em-dash usage, sentence uniformity | 0.836 |
+| [Linguistic Markers](https://sloptotal.com/engines/linguistic-markers/) | AI-preferred phrases ("delve", "tapestry"...) | 0.713 |
+| [Formulaic Patterns](https://sloptotal.com/engines/formulaic-patterns/) | Cliche openings and closings | 0.698 |
+| [Vocabulary Richness](https://sloptotal.com/engines/vocabulary-richness/) | Type-token ratio, hapax legomena | 0.583 |
+| [Readability Uniformity](https://sloptotal.com/engines/readability-uniformity/) | Cross-paragraph consistency | 0.581 |
+| [Burstiness](https://sloptotal.com/engines/burstiness/) | Per-sentence perplexity variance | 0.582 |
+| [Sentiment & Hedging](https://sloptotal.com/engines/sentiment-and-hedging/) | Hedging and forced balance | 0.522 |
+
+The linguistic heuristics are weak on their own. They are kept because they fail *independently* of the neural classifiers, which is what makes them useful as tiebreakers rather than as evidence.
+
+## Scoring
+
+The final score is **calibrated**, not a simple average, and every weight is
+derived from measurement rather than intuition. See
+[tests/eval/FINDINGS.md](tests/eval/FINDINGS.md) and
+[sloptotal.com/detect/ai-detector-ensemble/](https://sloptotal.com/detect/ai-detector-ensemble/).
+
+1. **Anchored on the unbiased classifiers** -- Desklib, SuperAnnotate, E5 and
+   ReMoDetect all score high AUC with no measurable bias against older prose.
+   Their consensus is blended 60/40 with the full weighted set.
+2. **Weights from measurement** -- each engine's share is proportional to
+   Somers' D (2*AUC - 1), scaled down by any bias it shows against archaic
+   writing. RAID-trained engines are damped because our corpus is RAID.
+3. **Confidence from agreement** -- a tight cluster across independent engine
+   families is trustworthy; one confident engine is not.
+4. **Skepticism, but only when earned** -- unanimous high classifier scores are
+   damped *only* when the text itself carries human markers (contractions,
+   first-person, slang). Applied unconditionally it fired on 69 of 70 AI samples
+   and 0 of 66 human ones, suppressing correct detections.
+
+Fakespot was previously the anchor, weighted 0.13. It is accurate on modern text
+(AUC 0.999) but scored pre-1920 human prose at 0.645 against 0.112 for modern
+human writing -- the largest bias of any engine -- and anchoring amplified it.
+Machiavelli scored 62.5. After demotion to 0.033, literary passages average 10.2
+and none is flagged.
+
+## Hardware Requirements
+
+SlopTotal auto-detects CPU, RAM, and GPU on startup and picks a profile (`lite`, `standard`, or `performance`).
+
+| Profile | RAM | CPU | GPU | Notes |
+|---------|-----|-----|-----|-------|
+| Lite | 4 GB | 2 cores | None | All engines, slower |
+| Standard | 8 GB | 4 cores | None | Default for most laptops |
+| Performance | 16 GB+ | 6+ cores | CUDA optional | Pool replicas, max throughput |
+
+**High-RAM CPU servers (e.g. 64 GB, no GPU):** you automatically get the `performance` profile. With no CUDA, all inference stays on CPU but you can run more concurrent workers and model pool replicas:
+
+```bash
+# Tune for a 64 GB CPU-only server
+export SLOPTOTAL_PROFILE=performance
+export SLOPTOTAL_TORCH_THREADS=8
+export SLOPTOTAL_FULL_WORKERS=8
+export SLOPTOTAL_SNIPPET_WORKERS=6
+export SLOPTOTAL_MAX_CONCURRENT_FULL=4
+export SLOPTOTAL_POOL_FAKESPOT=2
+export SLOPTOTAL_POOL_TMR=2
+./start.sh
 ```
 
-because detection is probabilistic.
+First full scan downloads ~2 GB of models and may take 1–2 minutes while weights load; subsequent scans are much faster.
 
----
+Hardware is auto-detected on startup. Override with environment variables:
 
-# 22. Confidence Categories
-
-A future PaperLab UI may expose categories such as:
-
-```text
-Low AI likelihood
-Uncertain
-High AI likelihood
+```bash
+SLOPTOTAL_TORCH_THREADS=4
+SLOPTOTAL_FULL_WORKERS=6
+SLOPTOTAL_SNIPPET_WORKERS=4
+SLOPTOTAL_MAX_CONCURRENT_FULL=3
 ```
 
-Thresholds must be selected using validation data.
+## Troubleshooting
 
-Do not arbitrarily assume:
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `TypeError: unsupported operand type(s) for \|` on startup | Python 3.9 or older | Use Python 3.10+ (`python3.11 -m venv venv`) |
+| `ModuleNotFoundError: No module named 'bs4'` | Missing dependency | `pip install -r requirements.txt` (includes `beautifulsoup4`) |
+| `Model loading failed` / tokenizer enum errors | Outdated `tokenizers` (<0.19) | `pip install -U 'transformers>=4.46' 'tokenizers>=0.21'` and restart |
+| Old scans still show engine failures | Cached report from before fix | Restart server (auto-purges stale cache) and run a **new** scan |
+| Engines stuck on "PENDING" in UI | Viewing an old report URL | Go to `/` and submit a fresh analysis |
 
-```text
-0–30 = human
-30–70 = uncertain
-70–100 = AI
+Verify all engines loaded:
+
+```bash
+curl -s http://localhost:8000/health | python3 -m json.tool
+# Expect: "status": "healthy", "engines": 23
 ```
 
-without measuring the corresponding false-positive and false-negative rates.
+## Roadmap
 
----
+See [TODO.md](TODO.md) for planned engines — including **Qwen** and **Gemma** classifiers and perplexity models optimized for high-RAM CPU servers.
 
-# 23. Production Cost Strategy
+## Related Projects & Reading
 
-PaperLab should not require a GPU server running continuously.
+**Similar tools**
+- [distil-labs/distil-ai-slop-detector](https://github.com/distil-labs/distil-ai-slop-detector) — 270M Gemma model, runs in the browser
+- [Flamehaven01/AI-SLOP-Detector](https://github.com/Flamehaven01/AI-SLOP-Detector) — static analyzer for AI-generated *code* (complementary to text detection)
+- [GLTR](http://gltr.io/) — visual token-rank inspection (inspiration for our GLTR engine)
 
-Training:
+**Papers & benchmarks**
+- [RAID benchmark](https://arxiv.org/abs/2405.07940) (ACL 2024) — adversarial AI text detection dataset; several SlopTotal engines are RAID-trained
+- [Detecting the Machine (2026)](https://arxiv.org/pdf/2603.17522) — cross-architecture detector benchmark; ensemble methods outperform single detectors
+- [EditLens / Greyscope](https://arxiv.org/abs/2510.03154) — human vs. AI-edited vs. AI-generated classification (candidate Qwen engine)
 
-```text
-Temporary GPU
-      |
-      v
-Train model
-      |
-      v
-Save model
-      |
-      v
-Shutdown GPU
+**Guides**
+- [Detecting AI Slop: Techniques & Red Flags](https://www.glukhov.org/post/2025/12/ai-slop-detection/) — perplexity, classifiers, and ensemble approaches
+
+## Chrome Extension
+
+The SlopTotal Chrome extension is maintained as a **separate open-source repository**:
+
+**[pablocaeg/sloptotal-extension](https://github.com/pablocaeg/sloptotal-extension)**
+
+Features:
+- Scans Google search results inline with AI probability badges
+- Scans LinkedIn feed posts with AI detection
+- Quick-score popup for any page or selected text
+- Right-click context menu integration
+- Configurable API — point at any SlopTotal backend
+
+Install from the [extension repo](https://github.com/pablocaeg/sloptotal-extension) or load `extension/` as an unpacked extension for development.
+
+## AI Agents
+
+This project ships with **11 specialized AI agents** that can autonomously navigate, build, test, review, and ship contributions. They work with any AI coding assistant — Claude Code, Cursor, GitHub Copilot, ChatGPT, Gemini, Windsurf, or programmatic API calls. Anyone who clones this repo gets access to them automatically.
+
+```
+sloptotal-expert          # Understand the codebase
+sloptotal-completionist   # Find what's missing or broken
+sloptotal-feature-builder # Build new engines, endpoints, pages
+sloptotal-test-writer     # Create tests with proper patterns
+sloptotal-reviewer        # Code review before PR
+sloptotal-optimizer       # Performance, SEO, accessibility
+sloptotal-deployer        # CI/CD and deployment
+sloptotal-open-source     # GitHub templates and discoverability
+sloptotal-extension-extractor  # Extract extension to its own repo
+sloptotal-pr-creator      # Git workflow and PR creation
+sloptotal-contribute      # Master orchestrator for end-to-end workflows
 ```
 
-Production:
+See [docs/ai-agents/](docs/ai-agents/) for full documentation, workflow pipelines, and usage examples.
 
-```text
-PaperLab API
-      |
-      v
-CPU inference worker
-      |
-      v
-DeBERTa detector
-```
+## Contributing
 
-If CPU performance becomes insufficient, a small GPU worker can be introduced later.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and how to add new detection engines.
 
----
+- [Bug Report](https://github.com/pablocaeg/sloptotal/issues/new?template=bug_report.yml)
+- [Feature Request](https://github.com/pablocaeg/sloptotal/issues/new?template=feature_request.yml)
+- [Propose a New Engine](https://github.com/pablocaeg/sloptotal/issues/new?template=new_engine.yml)
 
-# 24. Quantization
+## License
 
-After V1 accuracy is established, investigate:
-
-```text
-FP32
-  ↓
-FP16
-  ↓
-INT8
-```
-
-The goal is to reduce:
-
-* RAM usage
-* inference latency
-* CPU usage
-* hosting cost
-
-Quantization should only be adopted after measuring whether it materially affects detection quality.
-
----
-
-# 25. Evaluation Against Unseen Models
-
-This is one of the most important parts of the project.
-
-The detector should be evaluated against:
-
-```text
-Known generator
-      +
-Unseen generator
-      +
-Unseen prompts
-      +
-Different domains
-      +
-AI paraphrasing
-      +
-Human editing
-```
-
-Example:
-
-```text
-Training:
-GPT-A
-Claude-A
-Llama-A
-
-Testing:
-GPT-B
-Claude-B
-New generator
-Human-edited AI
-```
-
-A model that performs well only on generators it has seen during training is not sufficient.
-
----
-
-# 26. Adversarial Evaluation
-
-AI text can be modified.
-
-Test cases should include:
-
-```text
-Original AI text
-      |
-      +-- Paraphrased
-      |
-      +-- Rewritten
-      |
-      +-- Grammar corrected
-      |
-      +-- Human edited
-      |
-      +-- Sentence reordered
-```
-
-This should be part of the evaluation pipeline.
-
----
-
-# 27. Data Leakage Prevention
-
-The following must be checked:
-
-* Duplicate documents
-* Near-duplicate documents
-* Same prompt in train/test
-* Same generated output in train/test
-* Same source document in train/test
-* Generator leakage
-* Metadata leakage
-
-A model can appear extremely accurate if train/test contamination exists.
-
----
-
-# 28. Reproducibility
-
-Every experiment should record:
-
-```text
-Model version
-Dataset version
-Dataset hash
-Training configuration
-Random seed
-Python version
-PyTorch version
-Transformers version
-GPU
-Training duration
-Evaluation results
-```
-
-Recommended:
-
-```text
-experiments/
-└── 2026-XX-XX_v1/
-    ├── config.yaml
-    ├── metrics.json
-    ├── dataset_info.json
-    └── notes.md
-```
-
----
-
-# 29. Model Versioning
-
-Use explicit versions:
-
-```text
-paperlab-detector-v1.0
-paperlab-detector-v1.1
-paperlab-detector-v2.0
-```
-
-Example:
-
-```text
-v1.0
-Binary human/AI detector
-
-v1.1
-Improved dataset
-
-v1.2
-Improved unseen-model generalization
-
-v2.0
-Human / AI / AI-assisted / Mixed
-```
-
----
-
-# 30. V1 Success Criteria
-
-V1 should not be considered successful merely because it reaches high accuracy on a random test split.
-
-A successful V1 should demonstrate:
-
-* Strong performance on held-out data.
-* Low false-positive rate on human academic writing.
-* Reasonable performance on unseen generators.
-* Reasonable performance after AI paraphrasing.
-* Reproducible training.
-* Affordable inference.
-* Model small enough for practical deployment.
-
-The exact target metrics should be established after the first baseline experiment.
-
----
-
-# 31. Future Versions
-
-## V1
-
-```text
-Human vs AI
-DeBERTa-v3-small
-```
-
-## V2
-
-```text
-Human
-AI
-AI-assisted
-Mixed
-```
-
-## V3
-
-```text
-Sentence-level detection
-Paragraph-level evidence
-```
-
-## V4
-
-```text
-Generator/source attribution
-```
-
-## V5
-
-```text
-Multilingual detection
-```
-
-## V6
-
-```text
-Continuous evaluation
-Continuous dataset updates
-Model refresh pipeline
-```
-
----
-
-# 32. Important Limitations
-
-AI-text detection is inherently difficult.
-
-A detector cannot guarantee that:
-
-> "This text was definitely written by AI."
-
-It is possible for:
-
-* Human text to be classified as AI-like.
-* AI text to be classified as human-like.
-* New generators to behave differently from training data.
-* Human editing to change detector performance.
-* Translation or paraphrasing to change detector performance.
-
-Therefore PaperLab should treat the detector as an **analytical signal**, not definitive proof of authorship.
-
----
-
-# 33. Recommended V1 Development Order
-
-```text
-1. Set up Python/PyTorch
-        ↓
-2. Download selected datasets
-        ↓
-3. Inspect dataset distributions
-        ↓
-4. Normalize datasets
-        ↓
-5. Remove duplicates
-        ↓
-6. Design generator-disjoint split
-        ↓
-7. Build baseline classifier
-        ↓
-8. Train DeBERTa-v3-small
-        ↓
-9. Evaluate
-        ↓
-10. Analyze false positives
-        ↓
-11. Test unseen generators
-        ↓
-12. Test paraphrased/edited text
-        ↓
-13. Optimize model
-        ↓
-14. Export V1
-        ↓
-15. Integrate into PaperLab
-```
-
----
-
-# 34. Final V1 Architecture
-
-```text
-                    ┌─────────────────────┐
-                    │      PaperLab       │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │  PDF/DOCX Parser    │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │   Text Chunker      │
-                    │     512 tokens      │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ DeBERTa-v3-small    │
-                    │                     │
-                    │ PyTorch             │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Chunk probabilities │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Score Aggregator    │
-                    └──────────┬──────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │ Document AI Score   │
-                    └─────────────────────┘
-```
-
----
-
-# 35. V1 Principle
-
-The most important principle for PaperLab V1 is:
-
-> **Optimize for generalization and low false-positive rates, not an impressive accuracy number on an easy test set.**
-
-A detector that achieves 99% accuracy on contaminated or unrealistic test data is less useful than one that performs honestly and consistently on unseen modern AI-generated text.
-
-The first milestone is therefore not:
-
-**"Build the world's best AI detector."**
-
-It is:
-
-**"Build a reproducible, inexpensive baseline and determine exactly where it works and where it fails."**
-
-That baseline will give PaperLab a solid foundation for subsequent detector versions.
+MIT
