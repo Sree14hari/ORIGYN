@@ -146,23 +146,34 @@ def _preload_models():
     import threading
 
     def _preload():
-        loaders = [
-            ("GPT-2 Medium", "app.engines.perplexity", "_load_model"),
-            ("DistilGPT-2", "app.engines.cross_perplexity", "_load_distil_model"),
-            ("OpenAI detector", "app.engines.classifier_openai", "_load_model"),
-            ("ChatGPT detector", "app.engines.classifier_chatgpt", "_load_model"),
-            ("ReMoDetect DeBERTa", "app.engines.classifier_remodetect", "_load_model"),
-            ("Fakespot RoBERTa", "app.engines.classifier_fakespot", "_init_pool"),
-            ("E5-Small LoRA", "app.engines.classifier_e5", "_init_pool"),
-            ("TMR RoBERTa", "app.engines.classifier_tmr", "_init_pool"),
-            ("BERT-tiny RAID", "app.engines.classifier_bert_raid", "_init_pool"),
-            ("Desklib DeBERTa", "app.engines.classifier_desklib", "_load_model"),
-            (
-                "SuperAnnotate RoBERTa",
-                "app.engines.classifier_superannotate",
-                "_load_model",
-            ),
-        ]
+        is_lite = (_profile == "lite") or (os.getenv("SLOPTOTAL_LITE") == "1")
+
+        if is_lite:
+            # Lite profile: only preload the 4 fast engines used for quick scoring & snippet scans (~250MB total)
+            loaders = [
+                ("Fakespot RoBERTa", "app.engines.classifier_fakespot", "_init_pool"),
+                ("E5-Small LoRA", "app.engines.classifier_e5", "_init_pool"),
+                ("TMR RoBERTa", "app.engines.classifier_tmr", "_init_pool"),
+                ("BERT-tiny RAID", "app.engines.classifier_bert_raid", "_init_pool"),
+            ]
+        else:
+            loaders = [
+                ("GPT-2 Medium", "app.engines.perplexity", "_load_model"),
+                ("DistilGPT-2", "app.engines.cross_perplexity", "_load_distil_model"),
+                ("OpenAI detector", "app.engines.classifier_openai", "_load_model"),
+                ("ChatGPT detector", "app.engines.classifier_chatgpt", "_load_model"),
+                ("ReMoDetect DeBERTa", "app.engines.classifier_remodetect", "_load_model"),
+                ("Fakespot RoBERTa", "app.engines.classifier_fakespot", "_init_pool"),
+                ("E5-Small LoRA", "app.engines.classifier_e5", "_init_pool"),
+                ("TMR RoBERTa", "app.engines.classifier_tmr", "_init_pool"),
+                ("BERT-tiny RAID", "app.engines.classifier_bert_raid", "_init_pool"),
+                ("Desklib DeBERTa", "app.engines.classifier_desklib", "_load_model"),
+                (
+                    "SuperAnnotate RoBERTa",
+                    "app.engines.classifier_superannotate",
+                    "_load_model",
+                ),
+            ]
 
         import importlib
 
@@ -174,11 +185,7 @@ def _preload_models():
             except Exception as e:
                 log.warning(f"{name} preload failed: {e}")
 
-        log.info("Model preloading complete — 23 engines ready")
-
-        # NOTE: GPT-2 Large (774M) is NOT pre-warmed here. It loads on-demand
-        # for full analysis only. Loading it eagerly would add ~3-5s startup
-        # and ~1.5GB RAM for signals that don't discriminate on scraped text.
+        log.info(f"Model preloading complete ({len(loaders)} engines ready)")
 
     threading.Thread(target=_preload, daemon=True).start()
 

@@ -61,10 +61,10 @@ def detect_hardware() -> dict:
 
 def choose_profile(hw: dict) -> str:
     """Choose a configuration profile based on hardware."""
-    # Explicit override
-    explicit = os.getenv("SLOPTOTAL_PROFILE")
-    if explicit and explicit in ("lite", "standard", "performance"):
-        return explicit
+    # Explicit override (check ORIGYN_PROFILE first, then fallback to SLOPTOTAL_PROFILE)
+    explicit = os.getenv("ORIGYN_PROFILE", os.getenv("SLOPTOTAL_PROFILE"))
+    if explicit and explicit.lower() in ("lite", "standard", "performance"):
+        return explicit.lower()
 
     if hw["cuda_available"] and hw["gpu_vram_gb"] >= 4.0:
         return "performance"
